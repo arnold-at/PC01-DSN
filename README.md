@@ -21,30 +21,40 @@ reels-downloader/
 ├── Dockerfile.optimizado
 └── Dockerfile.multistage
 
-## 🚀 Cómo correrlo con Docker
+## 🚀 Requisitos
 
-**Requisito:** tener Docker instalado.
+- Tener [Docker](https://www.docker.com/products/docker-desktop) instalado
 
-### Dockerfile básico
+## ▶️ Cómo correrlo
+
+### 1. Clonar el repositorio
+```bash
+git clone https://github.com/tu-usuario/reels-downloader.git
+cd PC01-DSN
+```
+
+### 2. Elegir un Dockerfile y construir la imagen
+
+#### Dockerfile básico
 ```bash
 docker build -t reelgrab:basic -f Dockerfile .
 docker run -p 8000:8000 reelgrab:basic
 ```
-Abrir en el navegador: `http://localhost:8000`
+Abrir: `http://localhost:8000`
 
-### Dockerfile optimizado
+#### Dockerfile optimizado
 ```bash
 docker build -t reelgrab:optimized -f Dockerfile.optimizado .
 docker run -p 8001:8000 reelgrab:optimized
 ```
-Abrir en el navegador: `http://localhost:8001`
+Abrir: `http://localhost:8001`
 
-### Dockerfile multistage
+#### Dockerfile multistage
 ```bash
 docker build -t reelgrab:multistage -f Dockerfile.multistage .
 docker run -p 8002:8000 reelgrab:multistage
 ```
-Abrir en el navegador: `http://localhost:8002`
+Abrir: `http://localhost:8002`
 
 ## 🐳 Diferencia entre los Dockerfiles
 
@@ -53,3 +63,9 @@ Abrir en el navegador: `http://localhost:8002`
 | `Dockerfile` | Básico, ideal para desarrollo |
 | `Dockerfile.optimizado` | Usuario no-root, 2 workers, más seguro |
 | `Dockerfile.multistage` | Virtualenv aislado, imagen más limpia |
+
+## ⚠️ Importante
+
+- Solo funciona con URLs de Reels: `instagram.com/reel/...`
+- No descarga Posts, Stories ni IGTV
+- Los videos se eliminan del servidor una vez descargados
