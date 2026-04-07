@@ -1,0 +1,108 @@
+# ============================================================
+# Dockerfile.multistage — Build multi-etapa
+# Instagram Reels Downloader
+# ============================================================
+# Etapas:
+#   1. base        → imagen base compartida con dependencias del SO
+#   2. builder     → instala dependencias Python en entorno virtual
+#   3. production  → imagen final mínima, solo lo necesario
+#
+# Ventajas:
+#   ✓ Imagen final sin herramientas de build (más pequeña y segura)
+#   ✓ Virtualenv aislado y portátil entre etapas
+#   ✓ Mejor layer caching
+#   ✓ Separación clara entre build y runtime
+# ============================================================
+
+# ─────────────────────────────────────────────────────────────
+# ETAPA 1: base — dependencias del sistema operativo
+# ─────────────────────────────────────────────────────────────
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1
+
+# Solo lo necesario en runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# ─────────────────────────────────────────────────────────────
+# ETAPA 2: builder — instala dependencias Python
+# ─────────────────────────────────────────────────────────────
+FROM base AS builder
+
+# Herramientas solo necesarias en build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Crear virtualenv para copiar fácilmente a la etapa final
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Instalar dependencias en el virtualenv
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r /tmp/requirements.txt \
+    # Extras para mayor rendimiento en producción
+    && pip install --no-cache-dir uvloop httptools \
+    && find /opt/venv -name "*.pyc" -delete \
+    && find /opt/venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+
+# ─────────────────────────────────────────────────────────────
+# ETAPA 3: production — imagen final mínima
+# ─────────────────────────────────────────────────────────────
+FROM base AS production
+
+LABEL maintainer="arnold-at"
+LABEL description="Instagram Reels Downloader - Multi-stage build"
+LABEL version="1.0"
+LABEL stage="production"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    ENVIRONMENT=production \
+    PORT=8000
+
+# ── Copiar virtualenv desde el builder (sin el compilador gcc) ──
+COPY --from=builder /opt/venv /opt/venv
+
+# ── Crear usuario no-root ────────────────────────────────────
+RUN groupadd --gid 1001 appgroup \
+    && useradd --uid 1001 --gid appgroup --shell /bin/bash --create-home appuser
+
+WORKDIR /app
+
+# ── Copiar solo el código necesario ─────────────────────────
+COPY --chown=appuser:appgroup backend/ ./backend/
+COPY --chown=appuser:appgroup frontend/ ./frontend/
+
+# ── Directorio de descargas ──────────────────────────────────
+RUN mkdir -p downloads && chown appuser:appgroup downloads
+
+# ── Cambiar a usuario no-root ────────────────────────────────
+USER appuser
+
+WORKDIR /app/backend
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+# ── Producción con uvloop + httptools para máximo rendimiento ─
+CMD ["uvicorn", "main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "2", \
+     "--loop", "uvloop", \
+     "--http", "httptools"]

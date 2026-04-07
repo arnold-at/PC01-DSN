@@ -1,0 +1,76 @@
+# ============================================================
+# Dockerfile.optimizado — Imagen optimizada para producción
+# Instagram Reels Downloader
+# ============================================================
+# Optimizaciones aplicadas:
+#   - Imagen base slim para menor tamaño
+#   - Layer caching: requirements antes que el código fuente
+#   - Usuario no-root por seguridad
+#   - Limpieza agresiva de cache y archivos temporales
+#   - Variables de entorno de producción
+# ============================================================
+
+FROM python:3.12-slim
+
+LABEL maintainer="arnold-at"
+LABEL description="Instagram Reels Downloader - Dockerfile optimizado"
+LABEL version="1.0"
+
+# ── Variables de entorno de producción ──────────────────────
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PORT=8000 \
+    ENVIRONMENT=production
+
+# ── Sistema: instalar solo lo esencial en una sola capa ─────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# ── Crear usuario no-root ───────────────────────────────────
+RUN groupadd --gid 1001 appgroup \
+    && useradd --uid 1001 --gid appgroup --shell /bin/bash --create-home appuser
+
+# ── Directorio de trabajo ───────────────────────────────────
+WORKDIR /app
+
+# ── Instalar dependencias Python (capa separada para caché) ─
+# Se copia PRIMERO el requirements.txt para aprovechar el
+# layer cache de Docker: si el código cambia pero no las
+# dependencias, esta capa no se reconstruye.
+COPY --chown=appuser:appgroup backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && find /usr/local/lib/python3.12 -name "*.pyc" -delete \
+    && find /usr/local/lib/python3.12 -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+# ── Copiar código fuente ─────────────────────────────────────
+COPY --chown=appuser:appgroup backend/ ./backend/
+COPY --chown=appuser:appgroup frontend/ ./frontend/
+
+# ── Directorio de descargas con permisos correctos ──────────
+RUN mkdir -p downloads && chown appuser:appgroup downloads
+
+# ── Cambiar a usuario no-root ────────────────────────────────
+USER appuser
+
+WORKDIR /app/backend
+
+# ── Puerto ───────────────────────────────────────────────────
+EXPOSE 8000
+
+# ── Healthcheck ──────────────────────────────────────────────
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+# ── Inicio con múltiples workers para producción ────────────
+CMD ["uvicorn", "main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "2", \
+     "--loop", "uvloop", \
+     "--http", "httptools"]
